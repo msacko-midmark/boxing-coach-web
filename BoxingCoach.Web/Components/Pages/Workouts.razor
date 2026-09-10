@@ -1,0 +1,63 @@
+@page "/workouts"
+@attribute [Authorize]
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+@inject CoachRecommendationService Coach
+
+<PageTitle>Workouts | Cornerwork</PageTitle>
+
+<div class="page-shell">
+    <header class="page-heading">
+        <div><span class="eyebrow">The program</span><h1>Pick your rounds.</h1><p>Recommendations put your goal first, then match your level and available time.</p></div>
+    </header>
+
+    <div class="filter-row" aria-label="Workout focus filters">
+        @foreach (var focus in focuses)
+        {
+            <button type="button" class="filter-button @(selectedFocus == focus ? "active" : null)" @onclick="() => selectedFocus = focus">@focus</button>
+        }
+    </div>
+
+    <div class="workout-grid full-grid">
+        @foreach (var plan in FilteredPlans)
+        {
+            <article class="workout-card @(recommendedIds.Contains(plan.Id) ? "recommended" : null)">
+                <div class="card-topline">
+                    <span class="focus-tag">@plan.Focus</span>
+                    @if (recommendedIds.Contains(plan.Id)) { <span class="coach-pick">Coach pick</span> }
+                </div>
+                <h2>@plan.Name</h2>
+                <p>@plan.Description</p>
+                <ol class="exercise-list">
+                    @foreach (var exercise in plan.Exercises.OrderBy(item => item.Sequence))
+                    {
+                        <li><span>@exercise.Name</span><small>@exercise.Rounds x @(exercise.SecondsPerRound / 60)m</small></li>
+                    }
+                </ol>
+                <div class="workout-meta"><strong>@plan.DurationMinutes min</strong><span>Level @plan.Difficulty</span></div>
+                <a class="card-action" href="log/@plan.Id">Log this workout <span aria-hidden="true">-></span></a>
+            </article>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly string[] focuses = ["All", "Technique", "Conditioning", "Defense", "Power", "Recovery"];
+    private string selectedFocus = "All";
+    private List<WorkoutPlan> plans = [];
+    private HashSet<int> recommendedIds = [];
+    private IEnumerable<WorkoutPlan> FilteredPlans => selectedFocus == "All" ? plans : plans.Where(plan => plan.Focus == selectedFocus);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await UserManager.GetUserAsync((await AuthenticationStateProvider.GetAuthenticationStateAsync()).User);
+        if (user is null) return;
+
+        await using var dbContext = await DbContextFactory.CreateDbContextAsync();
+        plans = await dbContext.WorkoutPlans.Include(plan => plan.Exercises).OrderBy(plan => plan.Difficulty).ToListAsync();
+        var profile = await dbContext.AthleteProfiles.SingleOrDefaultAsync(item => item.UserId == user.Id)
+            ?? new AthleteProfile { UserId = user.Id };
+        recommendedIds = (await Coach.GetRecommendationsAsync(profile)).Select(plan => plan.Id).ToHashSet();
+    }
+}

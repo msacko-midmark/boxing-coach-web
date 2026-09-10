@@ -1,0 +1,42 @@
+@page "/history"
+@attribute [Authorize]
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+
+<PageTitle>History | Cornerwork</PageTitle>
+
+<div class="page-shell">
+    <header class="page-heading"><div><span class="eyebrow">The tape</span><h1>Your training history.</h1><p>Patterns are easier to coach when the work is visible.</p></div><a class="btn btn-primary" href="log">Log a session</a></header>
+    @if (Logged) { <div class="success-banner">Session recorded. Nice work.</div> }
+    @if (sessions.Count == 0)
+    {
+        <div class="empty-state"><strong>No rounds logged yet.</strong><p>Complete your first session to start building a training record.</p><a href="workouts">Find a workout</a></div>
+    }
+    else
+    {
+        <div class="history-list">
+            @foreach (var session in sessions)
+            {
+                <article class="history-row">
+                    <div class="history-date"><strong>@session.CompletedAtUtc.ToLocalTime().ToString("dd")</strong><span>@session.CompletedAtUtc.ToLocalTime().ToString("MMM")</span></div>
+                    <div class="history-main"><span class="focus-tag">@session.WorkoutPlan.Focus</span><h2>@session.WorkoutPlan.Name</h2><p>@(string.IsNullOrWhiteSpace(session.Notes) ? "No corner notes." : session.Notes)</p></div>
+                    <div class="history-metrics"><span><strong>@session.DurationMinutes</strong> min</span><span><strong>@session.Effort</strong>/10 effort</span><span><strong>@session.Rating</strong>/5 quality</span></div>
+                </article>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery] public bool Logged { get; set; }
+    private List<WorkoutSession> sessions = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await UserManager.GetUserAsync((await AuthenticationStateProvider.GetAuthenticationStateAsync()).User);
+        if (user is null) return;
+        await using var dbContext = await DbContextFactory.CreateDbContextAsync();
+        sessions = await dbContext.WorkoutSessions.Include(item => item.WorkoutPlan).Where(item => item.UserId == user.Id).OrderByDescending(item => item.CompletedAtUtc).ToListAsync();
+    }
+}

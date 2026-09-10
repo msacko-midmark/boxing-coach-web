@@ -1,0 +1,82 @@
+﻿@page "/"
+@attribute [Authorize]
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+@inject CoachRecommendationService Coach
+
+<PageTitle>Dashboard | Cornerwork</PageTitle>
+
+<div class="page-shell">
+	<header class="page-heading dashboard-heading">
+		<div>
+			<span class="eyebrow">Your corner</span>
+			<h1>Train with intent.</h1>
+			<p>Today is another round to sharpen the details.</p>
+		</div>
+		<a class="btn btn-primary" href="workouts">Choose a workout</a>
+	</header>
+
+	@if (loading)
+	{
+		<p class="loading-state">Building your game plan...</p>
+	}
+	else
+	{
+		<section class="stat-grid" aria-label="Training summary">
+			<div class="stat-block"><span>Sessions</span><strong>@sessionCount</strong><small>all time</small></div>
+			<div class="stat-block"><span>Rounds logged</span><strong>@estimatedRounds</strong><small>estimated</small></div>
+			<div class="stat-block"><span>Minutes</span><strong>@totalMinutes</strong><small>under the lights</small></div>
+			<div class="stat-block accent"><span>This week</span><strong>@weeklySessions</strong><small>sessions complete</small></div>
+		</section>
+
+		<section class="section-block">
+			<div class="section-heading">
+				<div><span class="eyebrow">Coach's picks</span><h2>Recommended next rounds</h2></div>
+				<a class="text-link" href="profile">Tune recommendations</a>
+			</div>
+			<div class="workout-grid">
+				@foreach (var plan in recommendations)
+				{
+					<article class="workout-card">
+						<div class="card-topline"><span class="focus-tag">@plan.Focus</span><span>Level @plan.Difficulty</span></div>
+						<h3>@plan.Name</h3>
+						<p>@plan.Description</p>
+						<div class="workout-meta"><strong>@plan.DurationMinutes min</strong><span>@plan.Exercises.Sum(item => item.Rounds) rounds</span></div>
+						<a class="card-action" href="log/@plan.Id">Start this session <span aria-hidden="true">-></span></a>
+					</article>
+				}
+			</div>
+		</section>
+	}
+</div>
+
+@code {
+	private bool loading = true;
+	private int sessionCount;
+	private int weeklySessions;
+	private int totalMinutes;
+	private int estimatedRounds;
+	private IReadOnlyList<WorkoutPlan> recommendations = [];
+
+	protected override async Task OnInitializedAsync()
+	{
+		var user = await UserManager.GetUserAsync((await AuthenticationStateProvider.GetAuthenticationStateAsync()).User);
+		if (user is null)
+		{
+			return;
+		}
+
+		await using var dbContext = await DbContextFactory.CreateDbContextAsync();
+		var profile = await dbContext.AthleteProfiles.SingleOrDefaultAsync(item => item.UserId == user.Id)
+			?? new AthleteProfile { UserId = user.Id };
+		var sessions = await dbContext.WorkoutSessions.Where(item => item.UserId == user.Id).ToListAsync();
+
+		sessionCount = sessions.Count;
+		totalMinutes = sessions.Sum(item => item.DurationMinutes);
+		estimatedRounds = totalMinutes / 3;
+		weeklySessions = sessions.Count(item => item.CompletedAtUtc >= DateTime.UtcNow.AddDays(-7));
+		recommendations = await Coach.GetRecommendationsAsync(profile);
+		loading = false;
+	}
+}

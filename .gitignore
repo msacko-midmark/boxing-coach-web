@@ -1,0 +1,22 @@
+# Build output
+**/bin/
+**/obj/
+
+# Local application data
+*.db
+*.db-shm
+*.db-wal
+
+# User-specific files
+*.user
+*.suo
+.vs/
+.vscode/
+
+# Local secrets and environment overrides
+.env
+appsettings.Local.json
+
+# Test output
+TestResults/
+coverage/

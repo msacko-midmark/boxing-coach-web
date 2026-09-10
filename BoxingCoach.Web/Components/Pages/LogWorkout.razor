@@ -1,0 +1,95 @@
+@page "/log"
+@page "/log/{PlanId:int}"
+@using System.ComponentModel.DataAnnotations
+@attribute [Authorize]
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+@inject NavigationManager NavigationManager
+
+<PageTitle>Log session | Cornerwork</PageTitle>
+
+<div class="page-shell narrow-shell">
+    <header class="page-heading"><div><span class="eyebrow">Round report</span><h1>Log the work.</h1><p>Honest notes make tomorrow's coaching better.</p></div></header>
+
+    <EditForm Model="entry" OnValidSubmit="SaveAsync" class="training-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+        <div class="form-section">
+            <label for="plan">Workout</label>
+            <InputSelect id="plan" class="form-select" @bind-Value="entry.WorkoutPlanId">
+                <option value="0">Select a workout</option>
+                @foreach (var plan in plans) { <option value="@plan.Id">@plan.Name - @plan.DurationMinutes min</option> }
+            </InputSelect>
+        </div>
+        <div class="form-grid">
+            <div class="form-section"><label for="duration">Minutes completed</label><InputNumber id="duration" class="form-control" @bind-Value="entry.DurationMinutes" /></div>
+            <div class="form-section"><label for="effort">Effort (1-10)</label><InputNumber id="effort" class="form-control" @bind-Value="entry.Effort" /></div>
+            <div class="form-section"><label for="rating">Quality (1-5)</label><InputNumber id="rating" class="form-control" @bind-Value="entry.Rating" /></div>
+        </div>
+        <div class="form-section"><label for="notes">Corner notes</label><InputTextArea id="notes" class="form-control notes-input" @bind-Value="entry.Notes" placeholder="What felt sharp? Where did your form break down?" /></div>
+        @if (!string.IsNullOrEmpty(errorMessage)) { <p class="form-error">@errorMessage</p> }
+        <button class="btn btn-primary" type="submit">Complete session</button>
+    </EditForm>
+</div>
+
+@code {
+    [Parameter] public int? PlanId { get; set; }
+    private List<WorkoutPlan> plans = [];
+    private SessionEntry entry = new();
+    private string? errorMessage;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await using var dbContext = await DbContextFactory.CreateDbContextAsync();
+        plans = await dbContext.WorkoutPlans.OrderBy(plan => plan.Name).ToListAsync();
+        if (PlanId.HasValue && plans.FirstOrDefault(plan => plan.Id == PlanId) is { } plan)
+        {
+            entry.WorkoutPlanId = plan.Id;
+            entry.DurationMinutes = plan.DurationMinutes;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!plans.Any(plan => plan.Id == entry.WorkoutPlanId))
+        {
+            errorMessage = "Choose the workout you completed.";
+            return;
+        }
+
+        var user = await UserManager.GetUserAsync((await AuthenticationStateProvider.GetAuthenticationStateAsync()).User);
+        if (user is null) return;
+
+        await using var dbContext = await DbContextFactory.CreateDbContextAsync();
+        dbContext.WorkoutSessions.Add(new WorkoutSession
+        {
+            UserId = user.Id,
+            WorkoutPlanId = entry.WorkoutPlanId,
+            CompletedAtUtc = DateTime.UtcNow,
+            DurationMinutes = entry.DurationMinutes,
+            Effort = entry.Effort,
+            Rating = entry.Rating,
+            Notes = entry.Notes
+        });
+        await dbContext.SaveChangesAsync();
+        NavigationManager.NavigateTo("history?logged=true");
+    }
+
+    private sealed class SessionEntry
+    {
+        public int WorkoutPlanId { get; set; }
+
+        [Range(1, 300)]
+        public int DurationMinutes { get; set; } = 45;
+
+        [Range(1, 10)]
+        public int Effort { get; set; } = 5;
+
+        [Range(1, 5)]
+        public int Rating { get; set; } = 3;
+
+        [MaxLength(500)]
+        public string Notes { get; set; } = string.Empty;
+    }
+}

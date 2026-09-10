@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="BoxingCoach.Web.Tests/BoxingCoach.Web.Tests.csproj" />
+  <Project Path="BoxingCoach.Web/BoxingCoach.Web.csproj" />
+</Solution>

@@ -1,0 +1,59 @@
+@page "/profile"
+@attribute [Authorize]
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+
+<PageTitle>Athlete profile | Cornerwork</PageTitle>
+
+<div class="page-shell narrow-shell">
+    <header class="page-heading"><div><span class="eyebrow">Coach settings</span><h1>Set your training target.</h1><p>These details shape the workouts recommended on your dashboard.</p></div></header>
+    <EditForm Model="profile" OnValidSubmit="SaveAsync" class="training-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+        <div class="form-section"><label for="goal">Primary goal</label><InputSelect id="goal" class="form-select" @bind-Value="profile.PrimaryGoal"><option>Technique</option><option>Conditioning</option><option>Defense</option><option>Power</option><option>Recovery</option></InputSelect></div>
+        <div class="form-grid">
+            <div class="form-section"><label for="level">Experience level (1-5)</label><InputNumber id="level" class="form-control" @bind-Value="profile.ExperienceLevel" /></div>
+            <div class="form-section"><label for="days">Training days per week</label><InputNumber id="days" class="form-control" @bind-Value="profile.TrainingDaysPerWeek" /></div>
+            <div class="form-section"><label for="minutes">Minutes per session</label><InputNumber id="minutes" class="form-control" @bind-Value="profile.PreferredMinutes" /></div>
+        </div>
+        @if (saved) { <p class="success-message">Profile saved. Your recommendations are updated.</p> }
+        <button class="btn btn-primary" type="submit">Save profile</button>
+    </EditForm>
+</div>
+
+@code {
+    private AthleteProfile profile = new();
+    private string? userId;
+    private bool saved;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await UserManager.GetUserAsync((await AuthenticationStateProvider.GetAuthenticationStateAsync()).User);
+        if (user is null) return;
+        userId = user.Id;
+        await using var dbContext = await DbContextFactory.CreateDbContextAsync();
+        profile = await dbContext.AthleteProfiles.SingleOrDefaultAsync(item => item.UserId == user.Id) ?? new AthleteProfile { UserId = user.Id };
+    }
+
+    private async Task SaveAsync()
+    {
+        if (userId is null) return;
+        await using var dbContext = await DbContextFactory.CreateDbContextAsync();
+        var stored = await dbContext.AthleteProfiles.SingleOrDefaultAsync(item => item.UserId == userId);
+        if (stored is null)
+        {
+            profile.UserId = userId;
+            dbContext.AthleteProfiles.Add(profile);
+        }
+        else
+        {
+            stored.PrimaryGoal = profile.PrimaryGoal;
+            stored.ExperienceLevel = profile.ExperienceLevel;
+            stored.TrainingDaysPerWeek = profile.TrainingDaysPerWeek;
+            stored.PreferredMinutes = profile.PreferredMinutes;
+        }
+        await dbContext.SaveChangesAsync();
+        saved = true;
+    }
+}
