@@ -45,6 +45,16 @@
 
         <AuthorizeView>
             <Authorized>
+                <AuthorizeView Roles="Administrator">
+                    <Authorized Context="adminContext">
+                        <div class="nav-kicker">Administration</div>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="admin/backups">
+                                <span class="nav-number">DB</span> Backups
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="Account/Manage">
                         <span class="nav-number">ME</span> Account

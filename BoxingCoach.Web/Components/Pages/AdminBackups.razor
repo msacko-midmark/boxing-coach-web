@@ -1,0 +1,163 @@
+@page "/admin/backups"
+@attribute [Authorize(Roles = "Administrator")]
+@inject IDatabaseBackupService BackupService
+@inject ILogger<AdminBackups> Logger
+
+<PageTitle>Database Backups | Cornerwork</PageTitle>
+
+<div class="page-shell admin-shell">
+    <header class="page-heading">
+        <div>
+            <span class="eyebrow">Administration</span>
+            <h1>Database backups.</h1>
+            <p>Create consistent snapshots and restore the site database from a verified backup.</p>
+        </div>
+        <button type="button" class="btn btn-primary" disabled="@isBusy" @onclick="CreateBackupAsync">
+            @(isBusy ? "Working..." : "Create backup")
+        </button>
+    </header>
+
+    @if (statusMessage is not null)
+    {
+        <div class="status-banner @(hasError ? "error" : "success")" role="status">@statusMessage</div>
+    }
+
+    <section class="backup-summary" aria-label="Backup summary">
+        <div><span>Total backups</span><strong>@backups.Count</strong></div>
+        <div><span>Storage used</span><strong>@FormatSize(backups.Sum(backup => backup.SizeBytes))</strong></div>
+        <div><span>Latest backup</span><strong class="summary-date">@(backups.Count == 0 ? "None" : backups[0].CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy h:mm tt"))</strong></div>
+    </section>
+
+    <div class="admin-grid">
+        <section class="restore-panel" aria-labelledby="restore-heading">
+            <span class="eyebrow">Recovery</span>
+            <h2 id="restore-heading">Restore database</h2>
+            <p>Restoring replaces current site data. A fresh safety snapshot is created automatically first.</p>
+
+            <label for="backup-select">Backup</label>
+            <select id="backup-select" class="form-select" @bind="selectedFileName" @bind:after="ResetConfirmation" disabled="@(backups.Count == 0 || isBusy)">
+                <option value="">Select a backup</option>
+                @foreach (var backup in backups)
+                {
+                    <option value="@backup.FileName">@backup.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy h:mm tt") - @FormatSize(backup.SizeBytes)</option>
+                }
+            </select>
+
+            <label class="confirmation-row">
+                <input type="checkbox" @bind="restoreConfirmed" disabled="@(string.IsNullOrEmpty(selectedFileName) || isBusy)" />
+                <span>I understand that current data will be replaced.</span>
+            </label>
+
+            <button type="button" class="btn restore-button" disabled="@(!CanRestore)" @onclick="RestoreAsync">Restore selected backup</button>
+        </section>
+
+        <section class="backup-list-panel" aria-labelledby="backup-list-heading">
+            <div class="panel-heading">
+                <div><span class="eyebrow">Archive</span><h2 id="backup-list-heading">Available backups</h2></div>
+                <span class="record-count">@backups.Count records</span>
+            </div>
+
+            @if (backups.Count == 0)
+            {
+                <div class="empty-state"><strong>No backups yet.</strong><p>Create the first snapshot before making major changes.</p></div>
+            }
+            else
+            {
+                <div class="backup-list">
+                    @foreach (var backup in backups)
+                    {
+                        <article class="backup-row">
+                            <div class="backup-mark" aria-hidden="true">DB</div>
+                            <div class="backup-details">
+                                <strong>@backup.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</strong>
+                                <span>@backup.FileName</span>
+                            </div>
+                            <div class="backup-meta">
+                                @if (backup.IsPreRestoreSnapshot) { <span class="safety-label">Safety</span> }
+                                <strong>@FormatSize(backup.SizeBytes)</strong>
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<DatabaseBackup> backups = [];
+    private string selectedFileName = string.Empty;
+    private string? statusMessage;
+    private bool restoreConfirmed;
+    private bool isBusy;
+    private bool hasError;
+    private bool CanRestore => !isBusy && restoreConfirmed && !string.IsNullOrEmpty(selectedFileName);
+
+    protected override async Task OnInitializedAsync() => await LoadBackupsAsync();
+
+    private async Task CreateBackupAsync()
+    {
+        await RunOperationAsync(async () =>
+        {
+            var backup = await BackupService.CreateBackupAsync();
+            statusMessage = $"Backup created at {backup.CreatedAtUtc.ToLocalTime():h:mm tt}.";
+        });
+    }
+
+    private async Task RestoreAsync()
+    {
+        if (!CanRestore)
+        {
+            return;
+        }
+
+        var fileName = selectedFileName;
+        await RunOperationAsync(async () =>
+        {
+            await BackupService.RestoreAsync(fileName);
+            selectedFileName = string.Empty;
+            restoreConfirmed = false;
+            statusMessage = "Database restored successfully. A pre-restore safety backup was also saved.";
+        });
+    }
+
+    private async Task RunOperationAsync(Func<Task> operation)
+    {
+        isBusy = true;
+        hasError = false;
+        statusMessage = null;
+        try
+        {
+            await operation();
+            await LoadBackupsAsync();
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Database backup operation failed.");
+            hasError = true;
+            statusMessage = "The database operation failed. No restore was applied. Check the server logs for details.";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task LoadBackupsAsync() => backups = await BackupService.GetBackupsAsync();
+
+    private void ResetConfirmation() => restoreConfirmed = false;
+
+    private static string FormatSize(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB"];
+        var size = (double)bytes;
+        var unit = 0;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+
+        return $"{size:0.#} {units[unit]}";
+    }
+}

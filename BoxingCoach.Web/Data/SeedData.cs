@@ -1,14 +1,38 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace BoxingCoach.Web.Data;
 
+/// <summary>
+/// Applies database migrations and establishes idempotent baseline data during application startup.
+/// </summary>
+/// <remarks>
+/// This bootstrapper belongs to the composition boundary rather than request handling. It creates
+/// its own dependency-injection scope, migrates the schema before querying it, reconciles configured
+/// administrator memberships, and inserts the built-in workout catalog only when no plans exist.
+/// Existing catalog data is never overwritten.
+/// </remarks>
 public static class SeedData
 {
+    /// <summary>
+    /// Brings the application database to the current schema and establishes required baseline data.
+    /// </summary>
+    /// <param name="services">
+    /// The root service provider used to create a temporary startup scope for scoped EF Core and
+    /// Identity services.
+    /// </param>
+    /// <returns>A task that completes when migration and seeding have finished.</returns>
+    /// <remarks>
+    /// Administrator role reconciliation runs on every startup so configuration changes take
+    /// effect for existing users. Workout plans use a coarse catalog-level idempotency check:
+    /// once any plan exists, the built-in catalog is considered initialized.
+    /// </remarks>
     public static async Task InitializeAsync(IServiceProvider services)
     {
         await using var scope = services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await dbContext.Database.MigrateAsync();
+        await SeedAdministratorsAsync(scope.ServiceProvider);
 
         if (await dbContext.WorkoutPlans.AnyAsync())
         {
@@ -40,6 +64,44 @@ public static class SeedData
         await dbContext.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Ensures the administrator role exists and grants it to already-registered users whose email
+    /// addresses appear in the <c>Admin:Emails</c> configuration section.
+    /// </summary>
+    /// <remarks>
+    /// Configuration does not create user accounts. This preserves Identity's registration and
+    /// credential workflows while allowing deployment configuration to control privileged access.
+    /// </remarks>
+    private static async Task SeedAdministratorsAsync(IServiceProvider services)
+    {
+        const string administratorRole = "Administrator";
+        var roleManager = services.GetRequiredService<RoleManager<IdentityRole>>();
+        if (!await roleManager.RoleExistsAsync(administratorRole))
+        {
+            var result = await roleManager.CreateAsync(new IdentityRole(administratorRole));
+            if (!result.Succeeded)
+            {
+                throw new InvalidOperationException($"Could not create the administrator role: {string.Join(", ", result.Errors.Select(error => error.Description))}");
+            }
+        }
+
+        var configuration = services.GetRequiredService<IConfiguration>();
+        var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
+        foreach (var email in configuration.GetSection("Admin:Emails").Get<string[]>() ?? [])
+        {
+            var user = await userManager.FindByEmailAsync(email.Trim());
+            if (user is not null && !await userManager.IsInRoleAsync(user, administratorRole))
+            {
+                var result = await userManager.AddToRoleAsync(user, administratorRole);
+                if (!result.Succeeded)
+                {
+                    throw new InvalidOperationException($"Could not grant administrator access to '{email}': {string.Join(", ", result.Errors.Select(error => error.Description))}");
+                }
+            }
+        }
+    }
+
+    /// <summary>Constructs a workout-plan aggregate and assigns a stable one-based exercise order.</summary>
     private static WorkoutPlan CreatePlan(
         string name,
         string focus,

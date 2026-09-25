@@ -11,6 +11,7 @@ Cornerwork is a personal boxing training companion built with .NET 10 Blazor and
 - Per-user training history and dashboard totals
 - Athlete profile controls for recommendation tuning
 - SQLite persistence with automatic EF Core migrations
+- Administrator-only database backup and restore portal
 - Responsive Blazor Server interface
 - Health endpoint at `/healthz`
 
@@ -45,6 +46,22 @@ dotnet run --project .\BoxingCoach.Web\BoxingCoach.Web.csproj
 ```
 
 Open the HTTPS URL printed by the application, register an account, and begin with the athlete profile page. The SQLite database is created as `boxing-coach.db` and is excluded from Git.
+
+## Database Administration
+
+The backup portal is available at `/admin/backups` to users in the `Administrator` role. Add registered account emails to configuration, then restart the application to grant the role:
+
+```json
+{
+  "Admin": {
+    "Emails": ["admin@example.com"]
+  }
+}
+```
+
+Use environment variables or deployment secrets in production, for example `Admin__Emails__0=admin@example.com`. Sign out and back in after the role is first granted so the authentication cookie includes the updated role.
+
+Backups are stored in `App_Data/Backups` by default. Set `DatabaseBackups__Directory` to an absolute path to place them on durable storage outside the deployment directory. Each restore validates the selected SQLite file and creates a `pre-restore` safety snapshot before replacing current data. For multi-instance deployments, use a shared operation lock or restrict backup administration to one instance because the built-in operation lock is process-local.
 
 ## Database Changes
 
