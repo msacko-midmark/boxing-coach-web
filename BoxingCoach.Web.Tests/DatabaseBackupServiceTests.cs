@@ -77,6 +77,56 @@ public sealed class DatabaseBackupServiceTests
     }
 
     [TestMethod]
+    public async Task GetBackupsAsync_WhenDirectoryMissing_ReturnsEmptyList()
+    {
+        var missingService = new DatabaseBackupService("Data Source=:memory:", Path.Combine(testDirectory, "does-not-exist"));
+
+        var backups = await missingService.GetBackupsAsync();
+
+        Assert.IsEmpty(backups);
+    }
+
+    [TestMethod]
+    public async Task GetBackupsAsync_IgnoresNonDatabaseFilesAndSortsNewestFirst()
+    {
+        Directory.CreateDirectory(backupDirectory);
+        var oldest = Path.Combine(backupDirectory, "older.db");
+        var newest = Path.Combine(backupDirectory, "newer.db");
+        var note = Path.Combine(backupDirectory, "notes.txt");
+
+        var olderTimestamp = DateTime.UtcNow.AddDays(-2);
+        var newerTimestamp = DateTime.UtcNow.AddDays(-1);
+
+        await File.WriteAllTextAsync(oldest, "older");
+        await File.WriteAllTextAsync(newest, "newer");
+        await File.WriteAllTextAsync(note, "ignore me");
+        File.SetCreationTimeUtc(oldest, olderTimestamp);
+        File.SetCreationTimeUtc(newest, newerTimestamp);
+
+        var backups = await service.GetBackupsAsync();
+
+        Assert.AreEqual("newer.db", backups[0].FileName);
+        Assert.AreEqual("older.db", backups[1].FileName);
+        Assert.IsFalse(backups.Any(item => item.FileName == "notes.txt"));
+    }
+
+    [TestMethod]
+    public async Task RestoreAsync_UnsupportedFileExtension_IsRejected()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => service.RestoreAsync("backup.txt"));
+        Assert.AreEqual("original", await GetDatabaseValueAsync());
+    }
+
+    [TestMethod]
+    public async Task CreateBackupAsync_WhenCancelled_ThrowsOperationCanceledException()
+    {
+        using var cancellationSource = new CancellationTokenSource();
+        cancellationSource.Cancel();
+
+        await Assert.ThrowsExactlyAsync<TaskCanceledException>(() => service.CreateBackupAsync(cancellationSource.Token));
+    }
+
+    [TestMethod]
     public async Task RestoreAsync_PathTraversal_IsRejected()
     {
         await Assert.ThrowsAsync<ArgumentException>(() => service.RestoreAsync("../site.db"));
