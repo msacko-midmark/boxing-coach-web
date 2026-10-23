@@ -66,6 +66,36 @@ public class CoachRecommendationServiceTests
         Assert.HasCount(3, recommendations);
     }
 
+    [TestMethod]
+    public async Task GetRecommendationsAsync_UsesCaseInsensitiveFocusAndTieBreakers()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using (var dbContext = new ApplicationDbContext(options))
+        {
+            await dbContext.Database.EnsureCreatedAsync();
+            dbContext.WorkoutPlans.AddRange(
+                new WorkoutPlan { Name = "Different goal", Focus = "Conditioning", Difficulty = 2, DurationMinutes = 45 },
+                new WorkoutPlan { Name = "Exact match but longer", Focus = "Technique", Difficulty = 5, DurationMinutes = 60 },
+                new WorkoutPlan { Name = "Best technique fit", Focus = "technique", Difficulty = 2, DurationMinutes = 45 },
+                new WorkoutPlan { Name = "Closer duration", Focus = "Technique", Difficulty = 2, DurationMinutes = 50 });
+            await dbContext.SaveChangesAsync();
+        }
+
+        var service = new CoachRecommendationService(new TestDbContextFactory(options));
+        var profile = new AthleteProfile { PrimaryGoal = "TECHNIQUE", ExperienceLevel = 2, PreferredMinutes = 50 };
+
+        var recommendations = await service.GetRecommendationsAsync(profile);
+
+        CollectionAssert.AreEqual(
+            new[] { "Closer duration", "Best technique fit", "Exact match but longer" },
+            recommendations.Take(3).Select(plan => plan.Name).ToArray());
+    }
+
     private sealed class TestDbContextFactory(DbContextOptions<ApplicationDbContext> options)
         : IDbContextFactory<ApplicationDbContext>
     {
